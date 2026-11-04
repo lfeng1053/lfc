@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <PlatformTarget>x64</PlatformTarget>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>Lfc</RootNamespace>
+    <AssemblyName>lfc</AssemblyName>
+    <ApplicationIcon>icon.ico</ApplicationIcon>
+    <Product>lfc</Product>
+    <Version>1.0.0</Version>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Default avatar, loaded with GetManifestResourceStream("Lfc.icon.png") -->
+    <EmbeddedResource Include="icon.png" LogicalName="Lfc.icon.png" />
+    <Reference Include="System.Runtime.Serialization" />
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.3967.48" />
+  </ItemGroup>
+
+</Project>
