@@ -7,7 +7,7 @@ namespace Lfc
 {
     /// <summary>
     /// Global hotkeys, written like "Ctrl+Alt+R", "Ctrl+Alt+PageUp", "Alt+Q".
-    /// Change them in %APPDATA%\lfc\settings.json.
+    /// Changed in the Settings window (tray icon → right-click → Settings).
     /// </summary>
     internal sealed class HotkeyWindow : NativeWindow, IDisposable
     {
@@ -36,6 +36,47 @@ namespace Lfc
             return ok;
         }
 
+        /// <summary>Unregisters every hotkey (e.g. while the Settings window records new ones).</summary>
+        public void Clear()
+        {
+            foreach (int id in _actions.Keys) UnregisterHotKey(Handle, id);
+            _actions.Clear();
+        }
+
+        /// <summary>
+        /// Turns a key press into a hotkey string like "Ctrl+Alt+R".
+        /// Returns null while only modifier keys are held, or when no Ctrl/Alt/Shift/Win is used.
+        /// </summary>
+        public static string FromKeyEvent(KeyEventArgs e)
+        {
+            Keys k = e.KeyCode;
+            if (k == Keys.ControlKey || k == Keys.ShiftKey || k == Keys.Menu || k == Keys.LWin || k == Keys.RWin ||
+                k == Keys.None) return null;
+            bool win = (GetKeyState(0x5B) & 0x8000) != 0 || (GetKeyState(0x5C) & 0x8000) != 0;
+            if (!e.Control && !e.Alt && !e.Shift && !win) return null;
+            var parts = new List<string>();
+            if (e.Control) parts.Add("Ctrl");
+            if (e.Alt) parts.Add("Alt");
+            if (e.Shift) parts.Add("Shift");
+            if (win) parts.Add("Win");
+            parts.Add(KeyName(k));
+            return string.Join("+", parts);
+        }
+
+        /// <summary>Readable key name (PageUp instead of Prior, 1 instead of D1...).</summary>
+        public static string KeyName(Keys k)
+        {
+            switch (k)
+            {
+                case Keys.PageUp: return "PageUp";
+                case Keys.PageDown: return "PageDown";
+                case Keys.Return: return "Enter";
+                case Keys.Escape: return "Escape";
+            }
+            if (k >= Keys.D0 && k <= Keys.D9) return ((int)(k - Keys.D0)).ToString();
+            return k.ToString();
+        }
+
         /// <summary>Parses a string like "Ctrl+Alt+R".</summary>
         public static bool TryParse(string spec, out uint mods, out Keys key)
         {
@@ -50,6 +91,7 @@ namespace Lfc
                 else if (p == "win") mods |= MOD_WIN;
                 else if (p == "pgup") key = Keys.PageUp;
                 else if (p == "pgdn" || p == "pagedn") key = Keys.PageDown;
+                else if (p.Length == 1 && p[0] >= '0' && p[0] <= '9') key = Keys.D0 + (p[0] - '0');
                 else
                 {
                     Keys k;

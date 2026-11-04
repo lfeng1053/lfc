@@ -99,6 +99,7 @@ namespace Lfc
             int ih = _box.PreferredHeight;
             Bounds = new Rectangle(box.Left + left, box.Top + (int)((BoxHeight * S - ih) / 2), w - left - right, ih);
 
+            ApplyOpacity();
             if (!Visible) Show();
             Activate();
             SetForegroundWindow(Handle);
@@ -179,10 +180,16 @@ namespace Lfc
             }
         }
 
+        /// <summary>Applies <see cref="LayeredForm.Alpha"/> to the text field layer.</summary>
+        public void ApplyOpacity()
+        {
+            if (IsHandleCreated) SetLayeredWindowAttributes(Handle, 0, LayeredForm.Alpha, LWA_ALPHA);
+        }
+
         protected override void OnHandleCreated(EventArgs e)
         {
             base.OnHandleCreated(e);
-            SetLayeredWindowAttributes(Handle, 0, 255, LWA_ALPHA);   // fully opaque, but click-through
+            ApplyOpacity();   // layered (click-through) with the popup opacity
         }
 
         protected override void Dispose(bool disposing)

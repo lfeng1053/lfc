@@ -21,15 +21,16 @@ USE
   - The popups ignore the mouse (it goes through them): keyboard only.
   - Only a failed send shows a red error; your text is kept, press Enter to retry.
 
-SETTINGS  (%APPDATA%\lfc\settings.json - edit with Notepad, then restart lfc)
-  "ReplyHotkey", "PrevHotkey", "NextHotkey"   e.g. "Alt+Q"
+SETTINGS  (right-click the tray icon -> Settings...)
+  Opacity of the popups, hotkeys, start with Windows.
+  More options in %APPDATA%\lfc\settings.json (edit with Notepad, then restart lfc):
   "HidePagerDots": true                       hide the small position dots
   "BubbleX", "BubbleY"                        position of the message box (pixels)
   "MyAvatarPath": "D:\\Mes\\lfc\\me.png"  your avatar in the reply box
                                               (empty = taken from Facebook)
 
 TRAY MENU (right-click the tray icon; left-click does nothing)
-  Start with Windows - Exit
+  Settings... - Exit
   (plus "Sign in to Facebook" while you are signed out)
 
 TROUBLESHOOTING

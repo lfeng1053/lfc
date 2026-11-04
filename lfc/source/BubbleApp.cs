@@ -45,6 +45,7 @@ namespace Lfc
         public BubbleApp(EventWaitHandle showSignal, bool autostart)
         {
             _settings = Settings.Load();
+            LayeredForm.Alpha = ToAlpha(_settings.Opacity);
             using (var g = Graphics.FromHwnd(IntPtr.Zero)) S = g.DpiX / 96f;
             _ui = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
 
@@ -89,8 +90,7 @@ namespace Lfc
             _tray = new NotifyIcon
             {
                 Icon = Program.AppIcon,
-                Text = Trim63(AppInfo.Name + " · " + _settings.ReplyHotkey + " reply · " +
-                              _settings.PrevHotkey + " / " + _settings.NextHotkey + " switch"),
+                Text = TrayText(),
                 Visible = true,
                 ContextMenuStrip = BuildMenu()
             };
@@ -103,9 +103,7 @@ namespace Lfc
 
             // --- hotkeys ---
             _hotkey = new HotkeyWindow();
-            _hotkey.Register(_settings.ReplyHotkey, Settings.DefaultHotkey, BeginReply);
-            _hotkey.Register(_settings.PrevHotkey, Settings.DefaultPrevHotkey, () => Switch(-1));
-            _hotkey.Register(_settings.NextHotkey, Settings.DefaultNextHotkey, () => Switch(1));
+            RegisterHotkeys();
 
             // --- app started a second time ---
             ThreadPool.RegisterWaitForSingleObject(showSignal,
@@ -335,13 +333,76 @@ namespace Lfc
             var signIn = new ToolStripMenuItem("Sign in to Facebook", null, (s, e) => ShowSignIn());
             menu.Items.Add(signIn);
             menu.Opening += (s, e) => signIn.Visible = !_chat.SignedIn;
-            var startup = new ToolStripMenuItem("Start with Windows") { CheckOnClick = true };
-            startup.CheckedChanged += (s, e) => SetStartup(startup.Checked);
-            menu.Opening += (s, e) => startup.Checked = IsStartupEnabled();
-            menu.Items.Add(startup);
+            menu.Items.Add("Settings...", null, (s, e) => OpenSettings());
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("Exit", null, (s, e) => ExitThread());
             return menu;
+        }
+
+        // ================= Settings =================
+        private SettingsForm _settingsForm;
+
+        private void OpenSettings()
+        {
+            if (_settingsForm != null) { _settingsForm.Activate(); return; }
+
+            // Pause the global hotkeys so the Settings window can record new combinations
+            _hotkey.Clear();
+            byte oldAlpha = LayeredForm.Alpha;
+            using (var f = new SettingsForm(_settings, IsStartupEnabled()))
+            {
+                _settingsForm = f;
+                f.OpacityPreview += pct => { LayeredForm.Alpha = ToAlpha(pct); RefreshPopups(); };
+                if (f.ShowDialog() == DialogResult.OK)
+                {
+                    _settings.Opacity = f.OpacityPercent;
+                    _settings.ReplyHotkey = f.ReplyHotkey;
+                    _settings.PrevHotkey = f.PrevHotkey;
+                    _settings.NextHotkey = f.NextHotkey;
+                    _settings.Save();
+                    try { SetStartup(f.StartWithWindows); } catch (Exception ex) { Log.Write("Start with Windows: " + ex.Message); }
+                    LayeredForm.Alpha = ToAlpha(_settings.Opacity);
+                    Log.Write("Settings saved: opacity " + _settings.Opacity + "%");
+                }
+                else LayeredForm.Alpha = oldAlpha;
+                _settingsForm = null;
+            }
+            RefreshPopups();
+            _tray.Text = TrayText();
+
+            string failed = RegisterHotkeys();
+            if (failed != null)
+                MessageBox.Show("These hotkeys are already used by another app and do not work:\n\n" + failed +
+                                "\n\nChoose other keys in Settings.", AppInfo.Name, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+
+        /// <summary>Registers the three hotkeys; returns the ones that failed (null = all fine).</summary>
+        private string RegisterHotkeys()
+        {
+            _hotkey.Clear();
+            string failed = null;
+            if (!_hotkey.Register(_settings.ReplyHotkey, Settings.DefaultHotkey, BeginReply)) failed += "Reply: " + _settings.ReplyHotkey + "\n";
+            if (!_hotkey.Register(_settings.PrevHotkey, Settings.DefaultPrevHotkey, () => Switch(-1))) failed += "Previous person: " + _settings.PrevHotkey + "\n";
+            if (!_hotkey.Register(_settings.NextHotkey, Settings.DefaultNextHotkey, () => Switch(1))) failed += "Next person: " + _settings.NextHotkey + "\n";
+            return failed;
+        }
+
+        /// <summary>Redraws the popups that are on screen (after an opacity change).</summary>
+        private void RefreshPopups()
+        {
+            if (_head.Visible) ShowHead();
+            _reply.ApplyOpacity();
+        }
+
+        private static byte ToAlpha(int percent)
+        {
+            return (byte)Math.Round(Math.Max(Settings.MinOpacity, Math.Min(100, percent)) * 2.55);
+        }
+
+        private string TrayText()
+        {
+            return Trim63(AppInfo.Name + " · " + _settings.ReplyHotkey + " reply · " +
+                          _settings.PrevHotkey + " / " + _settings.NextHotkey + " switch");
         }
 
         private static bool IsStartupEnabled()

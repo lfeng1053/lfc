@@ -20,6 +20,10 @@ namespace Lfc
         [DataMember] public string PrevHotkey = DefaultPrevHotkey;
         [DataMember] public string NextHotkey = DefaultNextHotkey;
 
+        /// <summary>Opacity of the popups in percent (30–100).</summary>
+        [DataMember] public int Opacity = 100;
+        public const int MinOpacity = 30;
+
         /// <summary>true = hide the small dots shown when several people are waiting.</summary>
         [DataMember] public bool HidePagerDots;
 
@@ -57,6 +61,8 @@ namespace Lfc
                             if (string.IsNullOrWhiteSpace(s.ReplyHotkey)) s.ReplyHotkey = DefaultHotkey;
                             if (string.IsNullOrWhiteSpace(s.PrevHotkey)) s.PrevHotkey = DefaultPrevHotkey;
                             if (string.IsNullOrWhiteSpace(s.NextHotkey)) s.NextHotkey = DefaultNextHotkey;
+                            if (s.Opacity <= 0 || s.Opacity > 100) s.Opacity = 100;
+                            if (s.Opacity < MinOpacity) s.Opacity = MinOpacity;
                             return s;
                         }
                     }

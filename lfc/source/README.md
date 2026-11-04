@@ -32,14 +32,21 @@ There is no Messenger window. The hidden Messenger page shows itself **only as a
 automatically, when you are signed out of Facebook** (first run, or if Facebook signs you out), and
 closes itself as soon as you are signed in. While signed out, the tray menu also has "Sign in to Facebook".
 
-Tray menu: Start with Windows · Exit (plus "Sign in to Facebook" while signed out).
+Tray menu (right-click): Settings... · Exit (plus "Sign in to Facebook" while signed out).
 
 ## Settings
-`%APPDATA%\lfc\settings.json` (restart the app after editing):
+Tray icon → right-click → **Settings...**:
+- **Opacity** of the popups (30–100 %), with a preview; applied live while dragging.
+- **Hotkeys**: click a box and press the new combination (needs Ctrl, Alt, Shift or Win). "Default" restores it.
+  Global hotkeys are paused while the window is open so they can be recorded.
+- **Start with Windows**.
+
+Everything is stored in `%APPDATA%\lfc\settings.json` (other entries can be edited there; restart the app after editing):
 
 | Entry | Meaning |
 |---|---|
 | `ReplyHotkey`, `PrevHotkey`, `NextHotkey` | Hotkeys, e.g. `"Alt+Q"`, `"Ctrl+Shift+Space"` |
+| `Opacity` | Popup opacity in percent (30–100) |
 | `HidePagerDots` | `true` hides the position dots |
 | `BubbleX`, `BubbleY` | Screen position (pixels) of the message box's top-left corner |
 | `MyAvatarPath` | Your avatar in the reply box, e.g. `"D:\\Mes\\lfc\\me.png"`. Empty = taken from your Facebook account |
@@ -53,7 +60,8 @@ Tray menu: Start with Windows · Exit (plus "Sign in to Facebook" while signed o
 | `ReplyBox.cs` | Reply box (design Asset 1): same box style, your avatar opposite the sender's. Made of `ReplyBackground` (box + avatar) and the text field placed inside it. |
 | `Person.cs` | One person waiting: avatar, latest message, unsent draft, send error. |
 | `ChatForm.cs` | Hidden Messenger page in WebView2: reads incoming messages (chat list + notifications), sends replies, blocks the news feed, detects the sign-in state (`SignedInChanged`). Shown only as the sign-in window while signed out. |
-| `HotkeyWindow.cs` | Global hotkeys. |
+| `HotkeyWindow.cs` | Global hotkeys (register, clear, record from a key press). |
+| `SettingsForm.cs` | Settings window: opacity, hotkeys, start with Windows. |
 | `Settings.cs`, `Log.cs` | Settings and log (`%LOCALAPPDATA%\lfc\log.txt`, never contains message text). |
 | `LayeredForm.cs`, `Gfx.cs`, `NativeMethods.cs` | Window and drawing helpers. |
 | `icon.png` (= design Asset 4), `icon.ico` | App icon and default avatar. `icon.ico` is generated from `icon.png`. |

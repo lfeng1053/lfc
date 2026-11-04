@@ -13,6 +13,9 @@ namespace Lfc
     /// </summary>
     internal class LayeredForm : Form
     {
+        /// <summary>Opacity of every popup (0–255), set from the Settings window.</summary>
+        public static byte Alpha = 255;
+
         /// <summary>true = clicking it does not take focus from other windows.</summary>
         protected bool NoActivate = true;
 
@@ -68,7 +71,7 @@ namespace Lfc
                 {
                     BlendOp = AC_SRC_OVER,
                     BlendFlags = 0,
-                    SourceConstantAlpha = 255,
+                    SourceConstantAlpha = Alpha,
                     AlphaFormat = AC_SRC_ALPHA
                 };
                 UpdateLayeredWindow(Handle, screenDc, ref dst, ref size, memDc, ref src, 0, ref blend, ULW_ALPHA);
