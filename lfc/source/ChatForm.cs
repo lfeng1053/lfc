@@ -79,6 +79,11 @@ namespace Lfc
   if (!window.chrome || !window.chrome.webview) return;
   window.__bubbleHooked = true;
   const store = {}; let seq = 0;
+  // Settling period after the chat list first appears: Facebook loads the list in batches, so
+  // everything seen during this time (including old unread messages) is only remembered.
+  const SETTLE_MS = 8000;
+  let settledAt = 0;                       // 0 = list not seen yet
+  const settled = () => settledAt > 0 && Date.now() >= settledAt;
   const emit = (o) => { try { window.chrome.webview.postMessage(JSON.stringify(o)); } catch (e) {} };
   class BubbleNotification extends EventTarget {
     constructor(title, opts) {
@@ -87,7 +92,7 @@ namespace Lfc
       this.icon = String(opts.icon || ''); this.tag = opts.tag || ''; this.data = opts.data;
       this.onclick = this.onclose = this.onshow = this.onerror = null;
       const id = ++seq; store[id] = this;
-      emit({ type: 'notif', id: id, title: this.title, body: this.body, icon: this.icon, tag: String(this.tag || '') });
+      if (settled()) emit({ type: 'notif', id: id, title: this.title, body: this.body, icon: this.icon, tag: String(this.tag || '') });
       setTimeout(() => { const ev = new Event('show'); this.dispatchEvent(ev); if (this.onshow) this.onshow(ev); }, 0);
     }
     close() { const ev = new Event('close'); this.dispatchEvent(ev); if (this.onclose) this.onclose(ev); }
@@ -103,7 +108,7 @@ namespace Lfc
   if (window.ServiceWorkerRegistration) {
     ServiceWorkerRegistration.prototype.showNotification = function (title, opts) {
       opts = opts || {};
-      emit({ type: 'notif', id: 0, title: String(title), body: String(opts.body || ''), icon: String(opts.icon || ''), tag: String(opts.tag || '') });
+      if (settled()) emit({ type: 'notif', id: 0, title: String(title), body: String(opts.body || ''), icon: String(opts.icon || ''), tag: String(opts.tag || '') });
       return Promise.resolve();
     };
   }
@@ -119,7 +124,6 @@ namespace Lfc
   const CONFIRM_MS = 500;      // text must stay unchanged at least this long
   const history = new Map();   // thread → last few texts seen
   const pending = new Map();   // thread → { body, t } waiting for confirmation
-  let baseline = false;
   const threadRe = /\/messages\/(?:e2ee\/)?t\/[^/?#]+/;
   const timeRe = /^(\d+\s*(phút|giờ|ngày|tuần|tháng|năm|m|h|d|w|y|min|mins|hr|hrs|wk|wks)|vừa xong|now|just now|\d{1,2}:\d{2}(\s*(sa|ch|am|pm))?|th\s?\d|cn|t\d|mon|tue|wed|thu|fri|sat|sun)$/i;
   // Status labels (green dot, seen...): neither name nor message
@@ -187,11 +191,15 @@ namespace Lfc
     let pos = 0;
     for (const a of rows) {
       const r = rowInfo(a);
-      const top = pos++ < TOP_ROWS;
+      const idx = pos++;
+      const top = idx < TOP_ROWS;
       if (!r || !r.body) continue;
       present.add(r.thread);
       const h = history.get(r.thread);
-      if (!baseline) { remember(r.thread, r.body); continue; }
+      if (!settled()) { remember(r.thread, r.body); continue; }   // settling: old messages, only remember
+      // A conversation never seen before counts only near the very top (a new sender is moved
+      // to the top); old rows that load late appear further down.
+      if (!h && idx > 1) { remember(r.thread, r.body); continue; }
       if (h && h.indexOf(r.body) >= 0) { pending.delete(r.thread); continue; }   // already seen
       const isActive = r.thread === activeThread;
       if ((!r.unread && !isActive) || !top || !isMessage(r.body)) {
@@ -211,7 +219,7 @@ namespace Lfc
       }
     }
     for (const k of Array.from(pending.keys())) if (!present.has(k)) pending.delete(k);
-    baseline = true;
+    if (!settledAt) { settledAt = now + SETTLE_MS; setTimeout(scan, SETTLE_MS + 100); }
     if (pending.size) setTimeout(scan, CONFIRM_MS + 50);   // scan again to confirm
   }
   window.__bubbleScan = scan;
