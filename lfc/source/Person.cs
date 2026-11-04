@@ -20,6 +20,8 @@ namespace Lfc
         public string Draft;
         /// <summary>Reason the last send failed (null = no error).</summary>
         public string Error;
+        /// <summary>Sent you a message you have not answered yet.</summary>
+        public bool Waiting;
 
         /// <summary>The message they just sent. Only the newest one is kept.</summary>
         public readonly List<string> Messages = new List<string>();

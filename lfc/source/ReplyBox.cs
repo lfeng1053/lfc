@@ -10,7 +10,7 @@ namespace Lfc
     /// Quick reply box (design: Des/Asset 1): grey rounded box like the message box,
     /// YOUR avatar inside the box, opposite the sender's avatar; the text field fills the rest.
     ///   Enter         → send
-    ///   Esc           → dismiss this message
+    ///   Esc           → close the reply panel
     ///   PageUp/PageDn → switch to another person
     /// Only when sending fails is a red error line shown inside the box.
     /// Keyboard-only: the mouse goes through both layers.
@@ -21,7 +21,7 @@ namespace Lfc
     internal sealed class ReplyBox : Form
     {
         public event Action<string> SendRequested;
-        public event Action Dismissed;            // Esc
+        public event Action Dismissed;            // Esc → close the panel
         public event Action<int> SwitchRequested; // -1 PageUp, +1 PageDown
         public event Action LostFocus2;           // clicked elsewhere
 

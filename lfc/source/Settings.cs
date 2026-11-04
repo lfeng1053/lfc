@@ -13,7 +13,7 @@ namespace Lfc
         public const string DefaultPrevHotkey = "Ctrl+Alt+PageUp";
         public const string DefaultNextHotkey = "Ctrl+Alt+PageDown";
 
-        /// <summary>Hotkey to open the reply box, e.g. "Ctrl+Alt+R", "Alt+Q".</summary>
+        /// <summary>Hotkey that turns the reply panel on / off, e.g. "Ctrl+Alt+R", "Alt+Q".</summary>
         [DataMember] public string ReplyHotkey = DefaultHotkey;
 
         /// <summary>Hotkeys to switch to the previous / next person waiting.</summary>

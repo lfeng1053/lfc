@@ -12,17 +12,20 @@ using Timer = System.Windows.Forms.Timer;
 namespace Lfc
 {
     /// <summary>
-    /// Runs the whole app. One flow only:
-    ///   message arrives → show avatar + name + text → press the hotkey (or click) → type → Enter sends.
-    /// Several people at once: Ctrl+Alt+PageUp/PageDown to look at each person and pick who to
-    /// reply to. Inside the reply box: PageUp/PageDown. The popups ignore the mouse (keyboard-only).
-    /// Nothing else is shown; only a failed send shows an error.
+    /// Runs the whole app.
+    ///  - A message arrives → the sender's avatar + name + text show for 5 s (notification).
+    ///  - Ctrl+Alt+R is an ON/OFF switch for the reply panel (message box + reply box):
+    ///      ON  → starts at the newest person waiting (or the person you talked to last);
+    ///            Ctrl+Alt+PageUp/PageDown (or PageUp/PageDown) switch between everyone waiting and
+    ///            the people you talked to recently; Enter sends and stays on that person.
+    ///      OFF → press Ctrl+Alt+R again, or Esc, or click elsewhere. Unsent text is kept.
+    /// The popups ignore the mouse (keyboard-only). Only a failed send shows an error.
     /// </summary>
     internal sealed class BubbleApp : ApplicationContext
     {
         private const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
         private const string RunName = AppInfo.Name;
-        private const int HeadVisibleMs = 12000;   // the message box hides after 12 s if you don't reply
+        private const int HeadVisibleMs = 5000;    // the message box hides after 5 s if you don't reply
 
         private readonly Settings _settings;
         private readonly float S;
@@ -34,9 +37,12 @@ namespace Lfc
         private readonly SynchronizationContext _ui;
         private readonly Timer _hideTimer = new Timer { Interval = HeadVisibleMs };
 
-        private readonly List<Person> _people = new List<Person>();   // people waiting, newest first
+        // Everyone in this session: people waiting for a reply and people you talked to recently,
+        // most recent activity first. Switching cycles through this list.
+        private readonly List<Person> _people = new List<Person>();
+        private const int MaxPeople = 15;
         private Person _current;                                       // person currently shown
-        private bool _replying;                                        // reply box is open
+        private bool _replying;                                        // reply panel is ON
         private bool _gettingMyAvatar;
         // What you just sent to each person: if the page reports that same text back, it is yours → ignore
         private readonly Dictionary<string, KeyValuePair<string, DateTime>> _sent =
@@ -60,17 +66,9 @@ namespace Lfc
             // --- reply box ---
             _reply = new ReplyBox(S);
             _reply.SendRequested += OnSend;
-            _reply.Dismissed += DismissCurrent;
+            _reply.Dismissed += ClosePanel;                 // Esc
             _reply.SwitchRequested += Switch;
-            _reply.LostFocus2 += () =>
-            {
-                // Clicked elsewhere: put the reply box away, keep the unsent text
-                if (!_replying) return;   // hidden because of send / dismiss, not a click elsewhere
-                if (_current != null) _current.Draft = _reply.Text2;
-                _reply.Hide();
-                _replying = false;
-                RestartHideTimer();
-            };
+            _reply.LostFocus2 += () => { if (_replying) ClosePanel(); };   // clicked elsewhere
 
             // --- hidden Messenger page ---
             _chat = new ChatForm(_settings, S);
@@ -107,7 +105,7 @@ namespace Lfc
 
             // --- app started a second time ---
             ThreadPool.RegisterWaitForSingleObject(showSignal,
-                (st, to) => _ui.Post(_ => { if (_people.Count > 0) BeginReply(); else ShowRunningNotice(); }, null),
+                (st, to) => _ui.Post(_ => ShowRunningNotice(), null),
                 null, Timeout.Infinite, false);
         }
 
@@ -124,30 +122,31 @@ namespace Lfc
                 return;
             }
             Person p = _people.Find(x => x.Key == key);
-            if (p == null)
-            {
-                p = new Person { Key = key };
-                _people.Insert(0, p);
-            }
+            if (p == null) p = new Person { Key = key };
             p.Name = n.Title;
             if (n.Id > 0) p.NotificationId = n.Id;
             if (!string.IsNullOrEmpty(n.Thread)) p.ThreadUrl = n.Thread;
             if (!string.IsNullOrEmpty(n.Icon) && n.Icon != p.IconUrl) { p.IconUrl = n.Icon; p.Avatar = null; }
             bool added = p.AddMessage(n.Body);
+            if (added) p.Waiting = true;
 
-            if (!_replying)
+            // Most recent activity first
+            _people.Remove(p);
+            _people.Insert(0, p);
+            TrimPeople();
+
+            if (_replying)
             {
-                // The newest sender moves to the front and is shown right away
-                _people.Remove(p);
-                _people.Insert(0, p);
+                // Panel ON: never jump away from the person you are replying to; the new sender is just
+                // added to the list (the dots update). Same person → their new message shows at once.
+                ShowHead();
+            }
+            else if (added || !_head.Visible)
+            {
+                // Panel OFF: show the new message as a notification (hides after 5 s)
                 _current = p;
-                if (added || !_head.Visible) ShowHead();
+                ShowHead();
             }
-            else if (p == _current && added)
-            {
-                ShowHead();   // replying to this very person → show their new message at once
-            }
-            // replying to someone else → this person waits; PageUp/PageDown gets to them
 
             if (p.Avatar == null && !string.IsNullOrEmpty(p.IconUrl))
             {
@@ -159,6 +158,12 @@ namespace Lfc
                     if (p == _current && _head.Visible) ShowHead();
                 }
             }
+        }
+
+        private void TrimPeople()
+        {
+            for (int i = _people.Count - 1; i >= 0 && _people.Count > MaxPeople; i--)
+                if (_people[i] != _current && !_people[i].Waiting) _people.RemoveAt(i);
         }
 
         private void ShowHead()
@@ -177,20 +182,41 @@ namespace Lfc
             if (!_replying) _hideTimer.Start();
         }
 
-        // ================= Replying =================
-        /// <summary>Hotkey: opens the reply box for the person shown (or the newest sender).</summary>
-        private void BeginReply()
+        // ================= Reply panel (ON / OFF switch) =================
+        /// <summary>Ctrl+Alt+R: turns the reply panel on, or off if it is already on.</summary>
+        private void TogglePanel()
+        {
+            if (_replying) ClosePanel();
+            else OpenPanel();
+        }
+
+        /// <summary>Turns the panel on: newest person waiting, otherwise the person you talked to last.</summary>
+        private void OpenPanel()
         {
             if (_replying) return;
-            if (_current == null || !_people.Contains(_current))
-                _current = _people.Count > 0 ? _people[0] : null;
-            if (_current == null) return;     // nobody has messaged → nothing to do
-
+            Person start = _people.Find(x => x.Waiting) ?? (_people.Count > 0 ? _people[0] : null);
+            if (start == null)
+            {
+                _tray.ShowBalloonTip(3000, AppInfo.Name, "No messages yet.", ToolTipIcon.Info);
+                return;
+            }
+            _current = start;
             _hideTimer.Stop();
             _replying = true;
             ShowHead();
             OpenReplyFor(_current);
             EnsureMyAvatar();
+        }
+
+        /// <summary>Turns the panel off (hotkey again, Esc, or a click elsewhere). Unsent text is kept.</summary>
+        private void ClosePanel()
+        {
+            if (!_replying) return;
+            if (_current != null) _current.Draft = _reply.Text2;
+            _replying = false;
+            _reply.Hide();
+            _hideTimer.Stop();
+            _head.Hide();
         }
 
         /// <summary>Your avatar for the reply box: the file from settings, otherwise taken from Facebook.</summary>
@@ -228,24 +254,18 @@ namespace Lfc
         }
 
         /// <summary>
-        /// Switches to the previous (-1) / next (+1) person waiting.
-        /// Works before opening the reply box too: browse, then pick who to reply to.
-        /// Order: newest sender first, wraps around.
+        /// Previous (-1) / next (+1) person: everyone waiting and everyone you talked to recently,
+        /// most recent first, wrapping around. When the panel is off, the first press turns it on.
         /// </summary>
         private void Switch(int dir)
         {
-            if (_people.Count == 0) return;
-            if (_current == null || !_people.Contains(_current)) _current = _people[0];
-
-            // Box is hidden → the first press just shows the current person again
-            if (!_head.Visible) { ShowHead(); return; }
-            if (_people.Count < 2) { if (!_replying) RestartHideTimer(); return; }
-
-            if (_replying) _current.Draft = _reply.Text2;
+            if (!_replying) { OpenPanel(); return; }
+            if (_people.Count < 2 || _current == null) return;
+            _current.Draft = _reply.Text2;
             int i = Math.Max(0, _people.IndexOf(_current));
             _current = _people[(i + dir + _people.Count) % _people.Count];
-            ShowHead();                          // restarts the hide timer when not replying
-            if (_replying) OpenReplyFor(_current);
+            ShowHead();
+            OpenReplyFor(_current);
         }
 
         /// <summary>Tray notice: the app is running in the background.</summary>
@@ -253,65 +273,33 @@ namespace Lfc
         {
             _tray.ShowBalloonTip(5000, AppInfo.Name + " is running",
                 "It waits in the tray for new messages (click ^ next to the clock to see the icon). " +
-                "Press " + _settings.ReplyHotkey + " to reply.", ToolTipIcon.Info);
+                "Press " + _settings.ReplyHotkey + " to open / close the reply panel.", ToolTipIcon.Info);
         }
 
         private static string Trim63(string s) { return s.Length <= 63 ? s : s.Substring(0, 62) + "…"; }
 
+        /// <summary>Enter: sends, then stays on the same person (send more, or switch to someone else).</summary>
         private async void OnSend(string text)
         {
             Person p = _current;
             if (p == null) return;
 
-            // Done once sent: put the reply box away, move on to the next person (if any), no status shown
-            _replying = false;
+            p.Waiting = false;          // answered
+            p.Draft = null;
+            p.Error = null;
             _reply.Reset();
-            _reply.Hide();
-            Remove(p);
-            ShowNextOrHide();
+            if (_replying) ShowHead();  // dots / panel stay as they are
 
             _sent[p.Key] = new KeyValuePair<string, DateTime>(text, DateTime.Now);
             string error = await _chat.SendAsync(p, text);
             Log.Write(error == null ? "Send: OK" : "Send: FAILED - " + error);
             if (error == null) return;
 
-            // Send failed: bring this person back and reopen the reply box with the text + error
+            // Send failed: keep the text and show the error (now if this person is on screen,
+            // otherwise when you switch back to them)
             p.Draft = text;
             p.Error = error;
-            if (!_people.Contains(p)) _people.Insert(0, p);
-            if (_replying) return;   // replying to someone else → the error waits until you switch here
-            _current = p;
-            _replying = true;
-            _hideTimer.Stop();
-            ShowHead();
-            OpenReplyFor(p);
-        }
-
-        /// <summary>Esc: dismisses the message of the person shown.</summary>
-        private void DismissCurrent()
-        {
-            if (_current == null) { _head.Hide(); return; }
-            _replying = false;
-            _reply.Reset();
-            _reply.Hide();
-            Remove(_current);
-            ShowNextOrHide();
-        }
-
-        private void Remove(Person p)
-        {
-            _people.Remove(p);
-            p.Messages.Clear();
-            p.Draft = null;
-            p.Error = null;
-            if (_current == p) _current = null;
-        }
-
-        private void ShowNextOrHide()
-        {
-            _current = _people.Count > 0 ? _people[0] : null;
-            if (_current == null) { _hideTimer.Stop(); _head.Hide(); }
-            else ShowHead();
+            if (_replying && _current == p) OpenReplyFor(p);
         }
 
         // ================= Sign-in window (only while signed out of Facebook) =================
@@ -329,10 +317,6 @@ namespace Lfc
         private ContextMenuStrip BuildMenu()
         {
             var menu = new ContextMenuStrip { ShowImageMargin = false };
-            // Shown only while signed out of Facebook
-            var signIn = new ToolStripMenuItem("Sign in to Facebook", null, (s, e) => ShowSignIn());
-            menu.Items.Add(signIn);
-            menu.Opening += (s, e) => signIn.Visible = !_chat.SignedIn;
             menu.Items.Add("Settings...", null, (s, e) => OpenSettings());
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("Exit", null, (s, e) => ExitThread());
@@ -349,7 +333,8 @@ namespace Lfc
             // Pause the global hotkeys so the Settings window can record new combinations
             _hotkey.Clear();
             byte oldAlpha = LayeredForm.Alpha;
-            using (var f = new SettingsForm(_settings, IsStartupEnabled()))
+            SettingsForm.Account account = SettingsForm.Account.None;
+            using (var f = new SettingsForm(_settings, IsStartupEnabled(), _chat.SignedIn))
             {
                 _settingsForm = f;
                 f.OpacityPreview += pct => { LayeredForm.Alpha = ToAlpha(pct); RefreshPopups(); };
@@ -363,6 +348,7 @@ namespace Lfc
                     try { SetStartup(f.StartWithWindows); } catch (Exception ex) { Log.Write("Start with Windows: " + ex.Message); }
                     LayeredForm.Alpha = ToAlpha(_settings.Opacity);
                     Log.Write("Settings saved: opacity " + _settings.Opacity + "%");
+                    account = f.AccountAction;
                 }
                 else LayeredForm.Alpha = oldAlpha;
                 _settingsForm = null;
@@ -374,6 +360,22 @@ namespace Lfc
             if (failed != null)
                 MessageBox.Show("These hotkeys are already used by another app and do not work:\n\n" + failed +
                                 "\n\nChoose other keys in Settings.", AppInfo.Name, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+
+            if (account == SettingsForm.Account.SignIn) ShowSignIn();
+            else if (account == SettingsForm.Account.LogOut) LogOut();
+        }
+
+        /// <summary>Logs out of Facebook and clears everyone waiting; the sign-in window then appears.</summary>
+        private async void LogOut()
+        {
+            _replying = false;
+            _reply.Reset();
+            _reply.Hide();
+            _people.Clear();
+            _current = null;
+            _hideTimer.Stop();
+            _head.Hide();
+            await _chat.LogoutAsync();
         }
 
         /// <summary>Registers the three hotkeys; returns the ones that failed (null = all fine).</summary>
@@ -381,7 +383,7 @@ namespace Lfc
         {
             _hotkey.Clear();
             string failed = null;
-            if (!_hotkey.Register(_settings.ReplyHotkey, Settings.DefaultHotkey, BeginReply)) failed += "Reply: " + _settings.ReplyHotkey + "\n";
+            if (!_hotkey.Register(_settings.ReplyHotkey, Settings.DefaultHotkey, TogglePanel)) failed += "Open / close: " + _settings.ReplyHotkey + "\n";
             if (!_hotkey.Register(_settings.PrevHotkey, Settings.DefaultPrevHotkey, () => Switch(-1))) failed += "Previous person: " + _settings.PrevHotkey + "\n";
             if (!_hotkey.Register(_settings.NextHotkey, Settings.DefaultNextHotkey, () => Switch(1))) failed += "Next person: " + _settings.NextHotkey + "\n";
             return failed;
@@ -401,7 +403,7 @@ namespace Lfc
 
         private string TrayText()
         {
-            return Trim63(AppInfo.Name + " · " + _settings.ReplyHotkey + " reply · " +
+            return Trim63(AppInfo.Name + " · " + _settings.ReplyHotkey + " open · " +
                           _settings.PrevHotkey + " / " + _settings.NextHotkey + " switch");
         }
 

@@ -43,6 +43,24 @@ namespace Lfc
         public event Action<bool> SignedInChanged;
 
         private bool? _signedIn;
+        private CoreWebView2Environment _env;
+
+        // ---- Light mode: keeps the hidden page as small as possible ----
+        // Browser switches: no GPU (nobody looks at the page), one renderer process, no extensions,
+        // no background updates / Edge extras.
+        private const string LightBrowserArgs =
+            "--disable-gpu --disable-gpu-compositing " +
+            "--renderer-process-limit=1 --disable-extensions --disable-component-update " +
+            "--disable-background-networking --disable-sync --no-first-run " +
+            "--disable-features=msSmartScreenProtection,msEdgeShoppingAssistant,msWebOOUI,msPdfOOUI," +
+            "SpareRendererForSitePerProcess,AutofillServerCommunication,MediaRouter";
+
+        /// <summary>
+        /// While signed in and hidden, the page loads no images, video, audio or web fonts:
+        /// the app only needs text and the avatar links (avatars are downloaded separately).
+        /// The sign-in window loads everything (captchas, profile pictures...).
+        /// </summary>
+        private bool LightMode { get { return SignedIn && !UserVisible; } }
         private readonly System.Windows.Forms.Timer _signInTimer = new System.Windows.Forms.Timer { Interval = 10000 };
 
         /// <summary>true once a Facebook session is detected.</summary>
@@ -357,8 +375,9 @@ namespace Lfc
             try
             {
                 string dataDir = Path.Combine(AppInfo.LocalDir, "WebView2");
-                var env = await CoreWebView2Environment.CreateAsync(null, dataDir);
-                await _web.EnsureCoreWebView2Async(env);
+                var options = new CoreWebView2EnvironmentOptions(LightBrowserArgs);
+                _env = await CoreWebView2Environment.CreateAsync(null, dataDir, options);
+                await _web.EnsureCoreWebView2Async(_env);
             }
             catch (WebView2RuntimeNotFoundException)
             {
@@ -381,6 +400,20 @@ namespace Lfc
             core.Settings.IsStatusBarEnabled = false;
             core.Settings.IsGeneralAutofillEnabled = true;
             core.Settings.IsPasswordAutosaveEnabled = true;
+            core.Settings.IsZoomControlEnabled = false;
+            core.Settings.IsPinchZoomEnabled = false;
+            core.Settings.IsSwipeNavigationEnabled = false;
+
+            // Light mode: block images / video / audio / fonts while hidden
+            core.AddWebResourceRequestedFilter("*", CoreWebView2WebResourceContext.Image);
+            core.AddWebResourceRequestedFilter("*", CoreWebView2WebResourceContext.Media);
+            core.AddWebResourceRequestedFilter("*", CoreWebView2WebResourceContext.Font);
+            core.WebResourceRequested += (s, e) =>
+            {
+                if (LightMode) e.Response = _env.CreateWebResourceResponse(null, 404, "Blocked by lfc", "");
+            };
+            SetMemoryLevel(low: true);
+            Log.Write("Light mode on");
 
             await core.AddScriptToExecuteOnDocumentCreatedAsync(HookScript);
 
@@ -419,7 +452,20 @@ namespace Lfc
             _signInTimer.Tick += async (s, e) => await CheckSignInAsync();
             _signInTimer.Start();
 
+            // Know the sign-in state before the first load, so light mode applies from the start
+            await CheckSignInAsync();
             core.Navigate(MessengerUrl);
+        }
+
+        /// <summary>Logs out of Facebook: clears the cookies and reloads (the sign-in window then appears).</summary>
+        public async Task LogoutAsync()
+        {
+            if (!WebReady) return;
+            _web.CoreWebView2.CookieManager.DeleteAllCookies();
+            Log.Write("Facebook: log out requested");
+            _web.CoreWebView2.Navigate(MessengerUrl);
+            await Task.Delay(1500);
+            await CheckSignInAsync();
         }
 
         private bool _checkingSignIn;
@@ -578,6 +624,7 @@ namespace Lfc
         public void PrepareForUser()
         {
             IsParked = false;
+            SetMemoryLevel(low: false);
             Size = new Size(Math.Max(_settings.ChatWidth, MinimumSize.Width), Math.Max(_settings.ChatHeight, MinimumSize.Height));
         }
 
@@ -594,7 +641,19 @@ namespace Lfc
         protected override void OnVisibleChanged(EventArgs e)
         {
             base.OnVisibleChanged(e);
-            if (!Visible) UseBackgroundSize();
+            if (!Visible) { UseBackgroundSize(); SetMemoryLevel(low: true); }
+        }
+
+        /// <summary>WebView2 memory target: Low while hidden (frees caches), Normal while you see it.</summary>
+        private void SetMemoryLevel(bool low)
+        {
+            try
+            {
+                if (WebReady)
+                    _web.CoreWebView2.MemoryUsageTargetLevel =
+                        low ? CoreWebView2MemoryUsageTargetLevel.Low : CoreWebView2MemoryUsageTargetLevel.Normal;
+            }
+            catch { /* older WebView2 runtime: not supported */ }
         }
 
         private readonly SemaphoreSlim _webLock = new SemaphoreSlim(1, 1);

@@ -7,7 +7,7 @@ namespace Lfc
 {
     /// <summary>
     /// Settings window (tray icon → right-click → Settings):
-    ///   Opacity of the popups, hotkeys (bindings), start with Windows.
+    ///   Opacity of the popups, hotkeys (bindings), start with Windows, Facebook account (sign in / log out).
     /// Global hotkeys are paused while this window is open so new combinations can be recorded.
     /// </summary>
     internal sealed class SettingsForm : Form
@@ -19,6 +19,10 @@ namespace Lfc
         public string NextHotkey { get { return _next.Text; } }
         public bool StartWithWindows { get { return _startup.Checked; } }
 
+        public enum Account { None, SignIn, LogOut }
+        /// <summary>Account action chosen with the Sign in / Log out button (done after the window closes).</summary>
+        public Account AccountAction { get; private set; }
+
         /// <summary>Raised while the opacity slider moves (live preview on screen).</summary>
         public event Action<int> OpacityPreview;
 
@@ -29,7 +33,7 @@ namespace Lfc
         private readonly CheckBox _startup;
         private readonly Label _error;
 
-        public SettingsForm(Settings s, bool startWithWindows)
+        public SettingsForm(Settings s, bool startWithWindows, bool signedIn)
         {
             Text = AppInfo.Name + " settings";
             Icon = Program.AppIcon;
@@ -77,17 +81,47 @@ namespace Lfc
             // ---- Hotkeys ----
             Controls.Add(Header("Hotkeys", x, y)); y += 26;
             Controls.Add(Note("Click a box, then press the new key combination (with Ctrl, Alt, Shift or Win).", x, y, w)); y += 38;
-            _reply = HotkeyRow("Reply", s.ReplyHotkey, Settings.DefaultHotkey, x, ref y, w);
+            _reply = HotkeyRow("Open / close", s.ReplyHotkey, Settings.DefaultHotkey, x, ref y, w);
             _prev = HotkeyRow("Previous person", s.PrevHotkey, Settings.DefaultPrevHotkey, x, ref y, w);
             _next = HotkeyRow("Next person", s.NextHotkey, Settings.DefaultNextHotkey, x, ref y, w);
-            Controls.Add(Note("Inside the reply box: Enter = send, Esc = dismiss, PageUp / PageDown = switch person.", x, y, w));
+            Controls.Add(Note("Inside the reply box: Enter = send, Esc = close, PageUp / PageDown = switch person.", x, y, w));
             y += 44;
 
             // ---- Startup ----
             Controls.Add(Header("Startup", x, y)); y += 26;
             _startup = new CheckBox { Text = "Start with Windows", Checked = startWithWindows, Location = new Point(x, y), AutoSize = true };
             Controls.Add(_startup);
-            y += 34;
+            y += 38;
+
+            // ---- Account ----
+            Controls.Add(Header("Facebook account", x, y)); y += 28;
+            var status = new Label
+            {
+                AutoSize = false, Location = new Point(x, y + 5), Size = new Size(w - 110, 20),
+                Text = signedIn ? "Signed in" : "Not signed in",
+                ForeColor = signedIn ? Color.FromArgb(40, 130, 70) : Color.FromArgb(200, 40, 50)
+            };
+            var account = new Button
+            {
+                Text = signedIn ? "Log out" : "Sign in",
+                Location = new Point(x + w - 100, y), Size = new Size(100, 28)
+            };
+            account.Click += delegate
+            {
+                if (signedIn)
+                {
+                    var r = MessageBox.Show(this, "Log out of Facebook in " + AppInfo.Name + "?\n\n" +
+                        "New messages will not appear until you sign in again.", AppInfo.Name,
+                        MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+                    if (r != DialogResult.Yes) return;
+                    AccountAction = Account.LogOut;
+                }
+                else AccountAction = Account.SignIn;
+                if (Validate2()) { DialogResult = DialogResult.OK; Close(); }   // also saves the other settings
+            };
+            Controls.Add(status);
+            Controls.Add(account);
+            y += 40;
 
             // ---- Error line + buttons ----
             _error = new Label
